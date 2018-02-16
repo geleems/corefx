@@ -174,6 +174,9 @@ namespace System.Data.SqlClient.SNI
 
             _stream = _tcpStream;
             _status = TdsEnums.SNI_SUCCESS;
+
+            _sslOverTdsStream = new SslOverTdsStream(_tcpStream);
+            _sslStream = new SslStream(_sslOverTdsStream, true, new RemoteCertificateValidationCallback(ValidateServerCertificate), null);
         }
 
 
@@ -353,12 +356,6 @@ namespace System.Data.SqlClient.SNI
         public override uint EnableSsl(uint options)
         {
             _validateCert = (options & TdsEnums.SNI_SSL_VALIDATE_CERTIFICATE) != 0;
-
-            if (_sslOverTdsStream == null || _sslStream == null)
-            {
-                _sslOverTdsStream = new SslOverTdsStream(_tcpStream);
-                _sslStream = new SslStream(_sslOverTdsStream, true, new RemoteCertificateValidationCallback(ValidateServerCertificate), null);
-            }
 
             try
             {

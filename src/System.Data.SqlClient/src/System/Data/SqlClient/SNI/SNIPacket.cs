@@ -92,12 +92,12 @@ namespace System.Data.SqlClient.SNI
         /// <summary>
         /// Allocate buffer space for data
         /// </summary>
-        /// <param name="dataBufferLength">Bytes to allocate</param>
-        public void Allocate(int dataBufferLength)
+        /// <param name="capacity">Bytes to allocate</param>
+        public void Allocate(int capacity)
         {
-            if (_data == null || _data.Length != dataBufferLength)
+            if (_data == null || _data.Length != capacity)
             {
-                _data = new byte[dataBufferLength];
+                _data = new byte[capacity];
             }
             Reset();
         }
@@ -121,23 +121,23 @@ namespace System.Data.SqlClient.SNI
         /// <summary>
         /// Get packet data
         /// </summary>
-        /// <param name="dataBuffer">Buffer</param>
-        /// <param name="dataLength">Data in packet</param>
-        public void GetData(byte[] dataBuffer, ref int dataLength)
+        /// <param name="buffer">Buffer</param>
+        /// <param name="dataSize">Data in packet</param>
+        public void GetData(byte[] buffer, ref int dataSize)
         {
-            Buffer.BlockCopy(_data, 0, dataBuffer, 0, _length);
-            dataLength = _length;
+            Buffer.BlockCopy(_data, 0, buffer, 0, _length);
+            dataSize = _length;
         }
 
         /// <summary>
         /// Set packet data
         /// </summary>
-        /// <param name="dataBuffer">Data</param>
-        /// <param name="dataLength">Length</param>
-        public void SetData(byte[] dataBuffer, int dataLength)
+        /// <param name="data">Data</param>
+        /// <param name="length">Length</param>
+        public void SetData(byte[] data, int length)
         {
-            _data = dataBuffer;
-            _length = dataLength;
+            _data = data;
+            _length = length;
             _offset = 0;
         }
 
@@ -158,11 +158,11 @@ namespace System.Data.SqlClient.SNI
         /// Append data
         /// </summary>
         /// <param name="data">Data</param>
-        /// <param name="count">Size</param>
-        public void AppendData(byte[] data, int count)
+        /// <param name="size">Size</param>
+        public void AppendData(byte[] data, int size)
         {
-            Buffer.BlockCopy(data, 0, _data, _length, count);
-            _length += count;
+            Buffer.BlockCopy(data, 0, _data, _length, size);
+            _length += size;
         }
 
         /// <summary>
@@ -178,26 +178,26 @@ namespace System.Data.SqlClient.SNI
         /// <summary>
         /// Take data from packet and advance offset
         /// </summary>
-        /// <param name="data">Buffer</param>
-        /// <param name="offset">Data offset</param>
-        /// <param name="count">Size</param>
+        /// <param name="buffer">Buffer</param>
+        /// <param name="dataOffset">Data offset</param>
+        /// <param name="size">Size</param>
         /// <returns></returns>
-        public int TakeData(byte[] data, int offset, int count)
+        public int TakeData(byte[] buffer, int dataOffset, int size)
         {
             if (_offset >= _length)
             {
                 return 0;
             }
 
-            if (_offset + count > _length)
+            if (_offset + size > _length)
             {
-                count = _length - _offset;
+                size = _length - _offset;
             }
 
-            Buffer.BlockCopy(_data, _offset, data, offset, count);
-            _offset += count;
+            Buffer.BlockCopy(_data, _offset, buffer, dataOffset, size);
+            _offset += size;
 
-            return count;
+            return size;
         }
 
         /// <summary>
