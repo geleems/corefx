@@ -4,13 +4,11 @@
 
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
@@ -38,6 +36,7 @@ namespace System.Data.SqlClient.SNI
 
         private bool _validateCert = true;
         private int _bufferSize = TdsEnums.DEFAULT_LOGIN_PACKET_SIZE;
+        private SNIPacket _sniPacket = new SNIPacket();
         private uint _status = TdsEnums.SNI_UNINITIALIZED;
         private Guid _connectionId = Guid.NewGuid();
 
@@ -48,29 +47,26 @@ namespace System.Data.SqlClient.SNI
         /// </summary>
         public override void Dispose()
         {
-            lock (this)
+            if (_sslOverTdsStream != null)
             {
-                if (_sslOverTdsStream != null)
-                {
-                    _sslOverTdsStream.Dispose();
-                    _sslOverTdsStream = null;
-                }
-
-                if (_sslStream != null)
-                {
-                    _sslStream.Dispose();
-                    _sslStream = null;
-                }
-
-                if (_tcpStream != null)
-                {
-                    _tcpStream.Dispose();
-                    _tcpStream = null;
-                }
-
-                //Release any references held by _stream.
-                _stream = null;
+                _sslOverTdsStream.Dispose();
+                _sslOverTdsStream = null;
             }
+
+            if (_sslStream != null)
+            {
+                _sslStream.Dispose();
+                _sslStream = null;
+            }
+
+            if (_tcpStream != null)
+            {
+                _tcpStream.Dispose();
+                _tcpStream = null;
+            }
+
+            //Release any references held by _stream.
+            _stream = null;
         }
 
         /// <summary>
@@ -164,9 +160,6 @@ namespace System.Data.SqlClient.SNI
 
                 _socket.NoDelay = true;
                 _tcpStream = new NetworkStream(_socket, true);
-
-                _sslOverTdsStream = new SslOverTdsStream(_tcpStream);
-                _sslStream = new SslStream(_sslOverTdsStream, true, new RemoteCertificateValidationCallback(ValidateServerCertificate), null);
             }
             catch (SocketException se)
             {
@@ -183,7 +176,8 @@ namespace System.Data.SqlClient.SNI
             _status = TdsEnums.SNI_SUCCESS;
         }
 
-        private static Socket Connect(string serverName, int port, TimeSpan timeout)
+
+        private Socket Connect(string serverName, int port, TimeSpan timeout)
         {
             IPAddress[] ipAddresses = Dns.GetHostAddresses(serverName);
             IPAddress serverIPv4 = null;
@@ -360,6 +354,12 @@ namespace System.Data.SqlClient.SNI
         {
             _validateCert = (options & TdsEnums.SNI_SSL_VALIDATE_CERTIFICATE) != 0;
 
+            if (_sslOverTdsStream == null || _sslStream == null)
+            {
+                _sslOverTdsStream = new SslOverTdsStream(_tcpStream);
+                _sslStream = new SslStream(_sslOverTdsStream, true, new RemoteCertificateValidationCallback(ValidateServerCertificate), null);
+            }
+
             try
             {
                 _sslStream.AuthenticateAsClient(_targetServer);
@@ -425,25 +425,22 @@ namespace System.Data.SqlClient.SNI
         /// <returns>SNI error code</returns>
         public override uint Send(SNIPacket packet)
         {
-            lock (this)
+            try
             {
-                try
-                {
-                    packet.WriteToStream(_stream);
-                    return TdsEnums.SNI_SUCCESS;
-                }
-                catch (ObjectDisposedException ode)
-                {
-                    return ReportTcpSNIError(ode);
-                }
-                catch (SocketException se)
-                {
-                    return ReportTcpSNIError(se);
-                }
-                catch (IOException ioe)
-                {
-                    return ReportTcpSNIError(ioe);
-                }
+                packet.WriteToStream(_stream);
+                return TdsEnums.SNI_SUCCESS;
+            }
+            catch (ObjectDisposedException ode)
+            {
+                return ReportTcpSNIError(ode);
+            }
+            catch (SocketException se)
+            {
+                return ReportTcpSNIError(se);
+            }
+            catch (IOException ioe)
+            {
+                return ReportTcpSNIError(ioe);
             }
         }
 
@@ -455,60 +452,58 @@ namespace System.Data.SqlClient.SNI
         /// <returns>SNI error code</returns>
         public override uint Receive(out SNIPacket packet, int timeoutInMilliseconds)
         {
-            lock (this)
+            packet = null;
+            if (timeoutInMilliseconds > 0)
             {
-                packet = null;
-                try
-                {
-                    if (timeoutInMilliseconds > 0)
-                    {
-                        _socket.ReceiveTimeout = timeoutInMilliseconds;
-                    }
-                    else if (timeoutInMilliseconds == -1)
-                    {   // SqlCient internally represents infinite timeout by -1, and for TcpClient this is translated to a timeout of 0 
-                        _socket.ReceiveTimeout = 0;
-                    }
-                    else
-                    {
-                        // otherwise it is timeout for 0 or less than -1
-                        ReportTcpSNIError(0, SNICommon.ConnTimeoutError, string.Empty);
-                        return TdsEnums.SNI_WAIT_TIMEOUT;
-                    }
+                _socket.ReceiveTimeout = timeoutInMilliseconds;
+            }
+            else if (timeoutInMilliseconds == -1)
+            {   // SqlCient internally represents infinite timeout by -1, and for TcpClient this is translated to a timeout of 0 
+                _socket.ReceiveTimeout = 0;
+            }
+            else
+            {
+                // otherwise it is timeout for 0 or less than -1
+                ReportTcpSNIError(0, SNICommon.ConnTimeoutError, string.Empty);
+                return TdsEnums.SNI_WAIT_TIMEOUT;
+            }
 
-                    packet = new SNIPacket(null);
-                    packet.Allocate(_bufferSize);
-                    packet.ReadFromStream(_stream);
+            _sniPacket.Allocate(_bufferSize);
+            try
+            {
+                _sniPacket.ReadFromStream(_stream);
 
-                    if (packet.Length == 0)
-                    {
-                        var e = new Win32Exception();
-                        return ReportErrorAndReleasePacket(packet, (uint)e.NativeErrorCode, 0, e.Message);
-                    }
+                if (_sniPacket.Length == 0)
+                {
+                    Win32Exception e = new Win32Exception();
+                    return ReportErrorAndReleasePacket(_sniPacket, (uint)e.NativeErrorCode, 0, e.Message);
+                }
 
-                    return TdsEnums.SNI_SUCCESS;
-                }
-                catch (ObjectDisposedException ode)
+                packet = _sniPacket;
+                return TdsEnums.SNI_SUCCESS;
+            }
+            catch (ObjectDisposedException ode)
+            {
+                return ReportErrorAndReleasePacket(packet, ode);
+            }
+            catch (SocketException se)
+            {
+                return ReportErrorAndReleasePacket(packet, se);
+            }
+            catch (IOException ioe)
+            {
+                if (ioe.InnerException is SocketException && ((SocketException)(ioe.InnerException)).SocketErrorCode == SocketError.TimedOut)
                 {
-                    return ReportErrorAndReleasePacket(packet, ode);
+                     return TdsEnums.SNI_WAIT_TIMEOUT;
                 }
-                catch (SocketException se)
+                else
                 {
-                    return ReportErrorAndReleasePacket(packet, se);
+                    return ReportErrorAndReleasePacket(packet, ioe);
                 }
-                catch (IOException ioe)
-                {
-                    uint errorCode = ReportErrorAndReleasePacket(packet, ioe);
-                    if (ioe.InnerException is SocketException && ((SocketException)(ioe.InnerException)).SocketErrorCode == SocketError.TimedOut)
-                    {
-                        errorCode = TdsEnums.SNI_WAIT_TIMEOUT;
-                    }
-
-                    return errorCode;
-                }
-                finally
-                {
-                    _socket.ReceiveTimeout = 0;
-                }
+            }
+            finally
+            {
+                _socket.ReceiveTimeout = 0;
             }
         }
 
@@ -532,42 +527,35 @@ namespace System.Data.SqlClient.SNI
         /// <returns>SNI error code</returns>
         public override uint SendAsync(SNIPacket packet, SNIAsyncCallback callback = null)
         {
-            SNIPacket newPacket = packet;
-
-            _writeTaskFactory.StartNew(() =>
-            {
-                try
+            Task writeTask = packet.WriteToStreamAsync(_stream);
+            writeTask.ConfigureAwait(false);
+            writeTask.ContinueWith((t) =>
                 {
-                    lock (this)
+                    if (t.IsFaulted)
                     {
-                        packet.WriteToStream(_stream);
+                        Exception e = t.Exception;
+                        SNILoadHandle.SingletonInstance.LastError = new SNIError(SNIProviders.TCP_PROV, SNICommon.InternalExceptionError, e);
+
+                        if (callback != null)
+                        {
+                            callback(packet, TdsEnums.SNI_ERROR);
+                        }
+                        else
+                        {
+                            _sendCallback(packet, TdsEnums.SNI_ERROR);
+                        }
                     }
-                }
-                catch (Exception e)
-                {
-                    SNILoadHandle.SingletonInstance.LastError = new SNIError(SNIProviders.TCP_PROV, SNICommon.InternalExceptionError, e);
 
                     if (callback != null)
                     {
-                        callback(packet, TdsEnums.SNI_ERROR);
+                        callback(packet, TdsEnums.SNI_SUCCESS);
                     }
                     else
                     {
-                        _sendCallback(packet, TdsEnums.SNI_ERROR);
+                        _sendCallback(packet, TdsEnums.SNI_SUCCESS);
                     }
-
-                    return;
                 }
-
-                if (callback != null)
-                {
-                    callback(packet, TdsEnums.SNI_SUCCESS);
-                }
-                else
-                {
-                    _sendCallback(packet, TdsEnums.SNI_SUCCESS);
-                }
-            });
+            );
 
             return TdsEnums.SNI_SUCCESS_IO_PENDING;
         }
@@ -579,28 +567,25 @@ namespace System.Data.SqlClient.SNI
         /// <returns>SNI error code</returns>
         public override uint ReceiveAsync(ref SNIPacket packet, bool isMars = false)
         {
-            lock (this)
+            packet = null;
+            _sniPacket.Allocate(_bufferSize);
+            try
             {
-                packet = new SNIPacket(null);
-                packet.Allocate(_bufferSize);
-
-                try
-                {
-                    packet.ReadFromStreamAsync(_stream, _receiveCallback, isMars);
-                    return TdsEnums.SNI_SUCCESS_IO_PENDING;
-                }
-                catch (ObjectDisposedException ode)
-                {
-                    return ReportErrorAndReleasePacket(packet, ode);
-                }
-                catch (SocketException se)
-                {
-                    return ReportErrorAndReleasePacket(packet, se);
-                }
-                catch (IOException ioe)
-                {
-                    return ReportErrorAndReleasePacket(packet, ioe);
-                }
+                _sniPacket.ReadFromStreamAsync(_stream, _receiveCallback, isMars);
+                packet = _sniPacket;
+                return TdsEnums.SNI_SUCCESS_IO_PENDING;
+            }
+            catch (ObjectDisposedException ode)
+            {
+                return ReportErrorAndReleasePacket(packet, ode);
+            }
+            catch (SocketException se)
+            {
+                return ReportErrorAndReleasePacket(packet, se);
+            }
+            catch (IOException ioe)
+            {
+                return ReportErrorAndReleasePacket(packet, ioe);
             }
         }
 
