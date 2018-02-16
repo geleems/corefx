@@ -17,6 +17,8 @@ namespace System.Data.SqlClient.SNI
         internal SNIPacket _sniAsyncAttnPacket = null;                // Packet to use to send Attn
         private readonly Dictionary<SNIPacket, SNIPacket> _pendingWritePackets = new Dictionary<SNIPacket, SNIPacket>(); // Stores write packets that have been sent to SNI, but have not yet finished writing (i.e. we are waiting for SNI's callback)
 
+        private readonly WritePacketCache _writePacketCache = new WritePacketCache(); // Store write packets that are ready to be re-used
+
         public TdsParserStateObjectManaged(TdsParser parser) : base(parser) { }
 
         internal SspiClientContextStatus sspiClientContextStatus = new SspiClientContextStatus();
@@ -107,7 +109,11 @@ namespace System.Data.SqlClient.SNI
 
         internal override void DisposePacketCache()
         {
-            // No - op
+            lock (_writePacketLockObject)
+            {
+                _writePacketCache.Dispose();
+                // Do not set _writePacketCache to null, just in case a WriteAsyncCallback completes after this point	
+            }
         }
 
         protected override void FreeGcHandle(int remaining, bool release)
@@ -188,9 +194,11 @@ namespace System.Data.SqlClient.SNI
             }
             else
             {
-                _sniPacket = new SNIPacket();
+                lock (_writePacketLockObject)
+                {
+                    _sniPacket = _writePacketCache.Take(Handle);
+                }
             }
-
             return _sniPacket;
         }
 
@@ -199,6 +207,11 @@ namespace System.Data.SqlClient.SNI
             if (_sniPacket != null)
             {
                 _sniPacket.Release();
+            }
+            lock (_writePacketLockObject)
+            {
+                Debug.Assert(_pendingWritePackets.Count == 0 && _asyncWriteCount == 0, "Should not clear all write packets if there are packets pending");
+                _writePacketCache.Clear();
             }
         }
 
@@ -231,5 +244,64 @@ namespace System.Data.SqlClient.SNI
         }
 
         internal override uint WaitForSSLHandShakeToComplete() => 0;
+
+        internal sealed class WritePacketCache : IDisposable
+        {
+            private bool _disposed;
+            private Stack<SNIPacket> _packets;
+
+            public WritePacketCache()
+            {
+                _disposed = false;
+                _packets = new Stack<SNIPacket>();
+            }
+
+            public SNIPacket Take(SNIHandle sniHandle)
+            {
+                SNIPacket packet;
+                if (_packets.Count > 0)
+                {
+                    // Success  reset the packet	
+                    packet = _packets.Pop();
+                    packet.Reset();
+                }
+                else
+                {
+                    // Failed to take a packet  create a new one	
+                    packet = new SNIPacket();
+                }
+                return packet;
+            }
+
+            public void Add(SNIPacket packet)
+            {
+                if (!_disposed)
+                {
+                    _packets.Push(packet);
+                }
+                else
+                {
+                    // If we're disposed, then get rid of any packets added to us	
+                    packet.Dispose();
+                }
+            }
+
+            public void Clear()
+            {
+                while (_packets.Count > 0)
+                {
+                    _packets.Pop().Dispose();
+                }
+            }
+
+            public void Dispose()
+            {
+                if (!_disposed)
+                {
+                    _disposed = true;
+                    Clear();
+                }
+            }
+        }
     }
 }
