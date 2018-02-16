@@ -161,6 +161,9 @@ namespace System.Data.SqlClient.SNI
 
                 _socket.NoDelay = true;
                 _tcpStream = new NetworkStream(_socket, true);
+
+                _sslOverTdsStream = new SslOverTdsStream(_tcpStream);
+                _sslStream = new SslStream(_sslOverTdsStream, true, new RemoteCertificateValidationCallback(ValidateServerCertificate), null);
             }
             catch (SocketException se)
             {
@@ -175,13 +178,10 @@ namespace System.Data.SqlClient.SNI
 
             _stream = _tcpStream;
             _status = TdsEnums.SNI_SUCCESS;
-
-            _sslOverTdsStream = new SslOverTdsStream(_tcpStream);
-            _sslStream = new SslStream(_sslOverTdsStream, true, new RemoteCertificateValidationCallback(ValidateServerCertificate), null);
         }
 
 
-        private Socket Connect(string serverName, int port, TimeSpan timeout)
+        private static Socket Connect(string serverName, int port, TimeSpan timeout)
         {
             IPAddress[] ipAddresses = Dns.GetHostAddresses(serverName);
             IPAddress serverIPv4 = null;
