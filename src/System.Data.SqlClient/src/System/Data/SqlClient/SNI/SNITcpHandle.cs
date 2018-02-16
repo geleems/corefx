@@ -528,29 +528,14 @@ namespace System.Data.SqlClient.SNI
             writeTask.ConfigureAwait(false);
             writeTask.ContinueWith((t) =>
                 {
+                    SNIAsyncCallback cb = callback ?? _sendCallback;
+                    uint status = TdsEnums.SNI_SUCCESS;
                     if (t.IsFaulted)
                     {
-                        Exception e = t.Exception;
-                        SNILoadHandle.SingletonInstance.LastError = new SNIError(SNIProviders.TCP_PROV, SNICommon.InternalExceptionError, e);
-
-                        if (callback != null)
-                        {
-                            callback(packet, TdsEnums.SNI_ERROR);
-                        }
-                        else
-                        {
-                            _sendCallback(packet, TdsEnums.SNI_ERROR);
-                        }
+                        SNILoadHandle.SingletonInstance.LastError = new SNIError(SNIProviders.TCP_PROV, SNICommon.InternalExceptionError, t.Exception);
+                        status = TdsEnums.SNI_ERROR;
                     }
-
-                    if (callback != null)
-                    {
-                        callback(packet, TdsEnums.SNI_SUCCESS);
-                    }
-                    else
-                    {
-                        _sendCallback(packet, TdsEnums.SNI_SUCCESS);
-                    }
+                    cb(packet, status);
                 }
             );
 
