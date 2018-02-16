@@ -105,6 +105,8 @@ namespace System.Data.SqlClient.SNI
                     DecrementPendingCallbacks(true); // Will dispose of GC handle.
                 }
             }
+
+            DisposePacketCache();
         }
 
         internal override void DisposePacketCache()
@@ -261,13 +263,13 @@ namespace System.Data.SqlClient.SNI
                 SNIPacket packet;
                 if (_packets.Count > 0)
                 {
-                    // Success  reset the packet	
+                    // Success - reset the packet
                     packet = _packets.Pop();
                     packet.Reset();
                 }
                 else
                 {
-                    // Failed to take a packet  create a new one	
+                    // Failed to take a packet - create a new one
                     packet = new SNIPacket();
                 }
                 return packet;
@@ -281,7 +283,7 @@ namespace System.Data.SqlClient.SNI
                 }
                 else
                 {
-                    // If we're disposed, then get rid of any packets added to us	
+                    // If we're disposed, then get rid of any packets added to us
                     packet.Dispose();
                 }
             }
