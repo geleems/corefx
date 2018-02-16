@@ -67,6 +67,7 @@ namespace System.Data.SqlClient.SNI
 
             //Release any references held by _stream.
             _stream = null;
+            _sniPacket.Dispose();
         }
 
         /// <summary>
@@ -450,6 +451,7 @@ namespace System.Data.SqlClient.SNI
         public override uint Receive(out SNIPacket packet, int timeoutInMilliseconds)
         {
             packet = null;
+
             if (timeoutInMilliseconds > 0)
             {
                 _socket.ReceiveTimeout = timeoutInMilliseconds;
@@ -491,7 +493,7 @@ namespace System.Data.SqlClient.SNI
             {
                 if (ioe.InnerException is SocketException && ((SocketException)(ioe.InnerException)).SocketErrorCode == SocketError.TimedOut)
                 {
-                     return TdsEnums.SNI_WAIT_TIMEOUT;
+                    return TdsEnums.SNI_WAIT_TIMEOUT;
                 }
                 else
                 {
@@ -524,7 +526,8 @@ namespace System.Data.SqlClient.SNI
         /// <returns>SNI error code</returns>
         public override uint SendAsync(SNIPacket packet, SNIAsyncCallback callback = null)
         {
-            Task writeTask = packet.WriteToStreamAsync(_stream);
+            Task writeTask = null;
+            writeTask = packet.WriteToStreamAsync(_stream);
             writeTask.ConfigureAwait(false);
             writeTask.ContinueWith((t) =>
                 {
