@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
+using System.Buffers;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,6 +14,7 @@ namespace System.Data.SqlClient.SNI
     /// </summary>
     internal class SNIPacket : IDisposable, IEquatable<SNIPacket>
     {
+        private static ArrayPool<byte> arrayPool = ArrayPool<byte>.Shared;
         private byte[] _data;
         private int _length;
         private int _offset;
@@ -67,8 +69,13 @@ namespace System.Data.SqlClient.SNI
 
         public void Dispose()
         {
-            _data = null;
-            Reset();
+            if (_data != null)
+            {
+                arrayPool.Return(_data);
+                _data = null;
+            }
+
+            Release();
         }
 
         /// <summary>
@@ -90,16 +97,23 @@ namespace System.Data.SqlClient.SNI
         }
 
         /// <summary>
-        /// Allocate buffer space for data
+        /// Allocate byte array for data.
         /// </summary>
-        /// <param name="capacity">Bytes to allocate</param>
-        public void Allocate(int capacity)
+        /// <param name="minimumLength">Minimum length of byte array to be allocated</param>
+        public void Allocate(int minimumLength)
         {
-            if (_data == null || _data.Length != capacity)
+            if (_data == null)
             {
-                _data = new byte[capacity];
+                _data = arrayPool.Rent(minimumLength);
             }
-            Reset();
+            else if (_data.Length < minimumLength)
+            {
+                arrayPool.Return(_data);
+                _data = arrayPool.Rent(minimumLength);
+            }
+
+            _length = 0;
+            _offset = 0;
         }
 
         /// <summary>

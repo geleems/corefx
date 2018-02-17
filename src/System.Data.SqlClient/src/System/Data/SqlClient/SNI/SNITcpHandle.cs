@@ -65,9 +65,14 @@ namespace System.Data.SqlClient.SNI
                 _tcpStream = null;
             }
 
+            if (_sniPacket != null)
+            {
+                _sniPacket.Dispose();
+                _sniPacket = null;
+            }
+
             //Release any references held by _stream.
             _stream = null;
-            _sniPacket.Dispose();
         }
 
         /// <summary>
@@ -526,9 +531,7 @@ namespace System.Data.SqlClient.SNI
         /// <returns>SNI error code</returns>
         public override uint SendAsync(SNIPacket packet, SNIAsyncCallback callback = null)
         {
-            Task writeTask = null;
-            writeTask = packet.WriteToStreamAsync(_stream);
-            writeTask.ConfigureAwait(false);
+            Task writeTask = packet.WriteToStreamAsync(_stream);
             writeTask.ContinueWith((t) =>
                 {
                     SNIAsyncCallback cb = callback ?? _sendCallback;
