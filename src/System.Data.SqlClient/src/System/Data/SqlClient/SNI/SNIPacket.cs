@@ -14,7 +14,7 @@ namespace System.Data.SqlClient.SNI
     /// </summary>
     internal class SNIPacket : IDisposable, IEquatable<SNIPacket>
     {
-        private static ArrayPool<byte> arrayPool = ArrayPool<byte>.Shared;
+        //private static ArrayPool<byte> arrayPool = ArrayPool<byte>.Shared;
         private byte[] _data;
         private int _length;
         private int _offset;
@@ -69,11 +69,14 @@ namespace System.Data.SqlClient.SNI
 
         public void Dispose()
         {
+            /*
             if (_data != null)
             {
                 arrayPool.Return(_data);
                 _data = null;
             }
+            */
+            _data = null;
 
             Release();
         }
@@ -104,12 +107,14 @@ namespace System.Data.SqlClient.SNI
         {
             if (_data == null)
             {
-                _data = arrayPool.Rent(minimumLength);
+                //_data = arrayPool.Rent(minimumLength);
+                _data = new byte[minimumLength];
             }
             else if (_data.Length < minimumLength)
             {
-                arrayPool.Return(_data);
-                _data = arrayPool.Rent(minimumLength);
+                //arrayPool.Return(_data);
+                //_data = arrayPool.Rent(minimumLength);
+                _data = new byte[minimumLength];
             }
 
             _length = 0;
@@ -123,7 +128,8 @@ namespace System.Data.SqlClient.SNI
         public SNIPacket Clone()
         {
             SNIPacket packet = new SNIPacket();
-            packet._data = arrayPool.Rent(_data.Length);
+            //packet._data = arrayPool.Rent(_data.Length);
+            packet._data = new byte[_length];
             Buffer.BlockCopy(_data, 0, packet._data, 0, _length);
             packet._length = _length;
             packet._description = _description;
