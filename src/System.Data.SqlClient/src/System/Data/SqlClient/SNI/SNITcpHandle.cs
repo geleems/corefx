@@ -22,11 +22,8 @@ namespace System.Data.SqlClient.SNI
     internal class SNITCPHandle : SNIHandle
     {
         private readonly string _targetServer;
-        private readonly object _callbackObject;
         private readonly Socket _socket;
         private NetworkStream _tcpStream;
-        private readonly TaskScheduler _writeScheduler;
-        private readonly TaskFactory _writeTaskFactory;
 
         private Stream _stream;
         private SslStream _sslStream;
@@ -106,9 +103,6 @@ namespace System.Data.SqlClient.SNI
         /// <param name="callbackObject">Callback object</param>
         public SNITCPHandle(string serverName, int port, long timerExpire, object callbackObject, bool parallel)
         {
-            _writeScheduler = new ConcurrentExclusiveSchedulerPair().ExclusiveScheduler;
-            _writeTaskFactory = new TaskFactory(_writeScheduler);
-            _callbackObject = callbackObject;
             _targetServer = serverName;
 
             try

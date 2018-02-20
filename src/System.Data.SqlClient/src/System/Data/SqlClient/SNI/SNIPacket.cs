@@ -123,7 +123,7 @@ namespace System.Data.SqlClient.SNI
         public SNIPacket Clone()
         {
             SNIPacket packet = new SNIPacket();
-            packet._data = new byte[_data.Length];
+            packet._data = arrayPool.Rent(_data.Length);
             Buffer.BlockCopy(_data, 0, packet._data, 0, _length);
             packet._length = _length;
             packet._description = _description;
