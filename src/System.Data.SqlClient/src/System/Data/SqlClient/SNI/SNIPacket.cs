@@ -288,7 +288,7 @@ namespace System.Data.SqlClient.SNI
                 options |= TaskContinuationOptions.LongRunning;
             }
 
-            stream.ReadAsync(_data, 0, _capacity, CancellationToken.None).ContinueWith(t =>
+            stream.ReadAsync(_data, 0, _data.Length, CancellationToken.None).ContinueWith(t =>
             {
                 Exception e = t.Exception != null ? t.Exception.InnerException : null;
                 if (e != null)
