@@ -20,7 +20,9 @@ namespace System.Data.SqlClient.SNI
         private int _offset;
         private string _description;
         private SNIAsyncCallback _completionCallback;
+
         private ArrayPool<byte>  _arrayPool = ArrayPool<byte>.Shared;
+        private bool _isBufferFromArrayPool = false;
 
         public SNIPacket() { }
 
@@ -42,19 +44,6 @@ namespace System.Data.SqlClient.SNI
             set
             {
                 _description = value;
-            }
-        }
-
-        public byte[] Data
-        {
-            get
-            {
-                return _data;
-            }
-
-            set
-            {
-                _data = value;
             }
         }
 
@@ -130,6 +119,8 @@ namespace System.Data.SqlClient.SNI
             _completionCallback(this, sniErrorCode);
         }
 
+
+
         /// <summary>
         /// Allocate space for data
         /// </summary>
@@ -138,13 +129,17 @@ namespace System.Data.SqlClient.SNI
         {
             if (_data != null && _data.Length < minimumLength)
             {
-                _arrayPool.Return(_data);
+                if (_isBufferFromArrayPool)
+                {
+                    _arrayPool.Return(_data);
+                }
                 _data = null;
             }
 
             if (_data == null)
             {
                 _data = _arrayPool.Rent(minimumLength);
+                _isBufferFromArrayPool = true;
             }
 
             _length = 0;
@@ -182,11 +177,12 @@ namespace System.Data.SqlClient.SNI
         /// </summary>
         /// <param name="data">Data</param>
         /// <param name="length">Length</param>
-        public void SetData(byte[] data, int length)
+        public void SetData(byte[] data, int length, bool isArrayFromArrayPool = false)
         {
             _data = data;
             _length = length;
             _offset = 0;
+            _isBufferFromArrayPool = isArrayFromArrayPool;
         }
 
         /// <summary>
