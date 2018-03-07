@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.IO;
 using System.Threading;
@@ -19,8 +20,14 @@ namespace System.Data.SqlClient.SNI
         private int _offset;
         private string _description;
         private SNIAsyncCallback _completionCallback;
+        private ArrayPool<byte>  _arrayPool = ArrayPool<byte>.Shared;
 
-        private SNIPacketFactory _sniPacketFactory = SNIPacketFactory.Instance;
+        public SNIPacket() { }
+
+        public SNIPacket(int minimumLength)
+        {
+            Allocate(minimumLength);
+        }
 
         /// <summary>
         /// Packet description (used for debugging)
@@ -123,36 +130,21 @@ namespace System.Data.SqlClient.SNI
             _completionCallback(this, sniErrorCode);
         }
 
-
-        public SNIPacketFactory Factory
-        {
-            get
-            {
-                return _sniPacketFactory;
-            }
-
-            set
-            {
-                _sniPacketFactory = value;
-            }
-        }
-
         /// <summary>
         /// Allocate space for data
         /// </summary>
         /// <param name="bufferSize">Length of byte array to be allocated</param>
-        public void Allocate(int bufferSize)
+        public void Allocate(int minimumLength)
         {
-            if (_data == null || _data.Length != bufferSize)
+            if (_data != null && _data.Length < minimumLength)
             {
-                if (_sniPacketFactory != null)
-                {
-                    _data = _sniPacketFactory.GetSNIPacketBuffer(bufferSize);
-                }
-                else
-                {
-                    _data = new byte[bufferSize];
-                }
+                _arrayPool.Return(_data);
+                _data = null;
+            }
+
+            if (_data == null)
+            {
+                _data = _arrayPool.Rent(minimumLength);
             }
 
             _length = 0;
@@ -165,17 +157,7 @@ namespace System.Data.SqlClient.SNI
         /// <returns>Cloned packet</returns>
         public SNIPacket Clone()
         {
-            SNIPacket packet;
-            if (_sniPacketFactory != null)
-            {
-                packet = _sniPacketFactory.GetSNIPacket(_data.Length);
-            }
-            else
-            {
-                packet = new SNIPacket();
-                packet._data = new byte[_data.Length];
-            }
-
+            SNIPacket packet = new SNIPacket(_length);
             Buffer.BlockCopy(_data, 0, packet._data, 0, _data.Length);
             packet._length = _length;
             packet._description = _description;
@@ -270,15 +252,12 @@ namespace System.Data.SqlClient.SNI
         /// </summary>
         public void Release()
         {
-            if (_sniPacketFactory != null)
+            if (_data != null)
             {
-                _sniPacketFactory.PutSNIPacket(this);
-            }
-            else
-            {
+                _arrayPool.Return(_data);
                 _data = null;
-                Reset();
             }
+            Reset();
         }
 
         /// <summary>
@@ -403,188 +382,6 @@ namespace System.Data.SqlClient.SNI
             }
 
             return false;
-        }
-    }
-
-    internal class SNIPacketFactory : IDisposable
-    {
-        private static SNIPacketFactory instance = new SNIPacketFactory();
-
-        public static SNIPacketFactory Instance
-        {
-            get
-            {
-                return instance;
-            }
-        }
-
-        private SNIPacketCache _sniPacketCache;
-        private ByteArrayCache _sniPacketBufferCache;
-
-        private SNIPacketFactory() { }
-
-        public void Dispose()
-        {
-            if(_sniPacketCache != null)
-            {
-                _sniPacketCache.Dispose();
-            }
-
-            if (_sniPacketBufferCache != null)
-            {
-                _sniPacketBufferCache.Dispose();
-            }
-        }
-
-        public SNIPacket GetSNIPacket()
-        {
-            SNIPacket sniPacket = null;
-
-            if (_sniPacketCache != null)
-            {
-                sniPacket = _sniPacketCache.Get();
-            }
-
-            if (sniPacket == null)
-            {
-                sniPacket = new SNIPacket();
-                sniPacket.Factory = this;
-            }
-
-            return sniPacket;
-        }
-
-        public SNIPacket GetSNIPacket(int bufferSize)
-        {
-            SNIPacket sniPacket = GetSNIPacket();
-            sniPacket.Data = GetSNIPacketBuffer(bufferSize);
-
-            return sniPacket;
-        }
-
-        public void PutSNIPacket(SNIPacket sniPacket)
-        {
-            if (sniPacket != null)
-            {
-                if (sniPacket.Data != null)
-                {
-                    if (_sniPacketBufferCache == null)
-                    {
-                        _sniPacketBufferCache = new ByteArrayCache();
-                    }
-                    _sniPacketBufferCache.Put(sniPacket.Data);
-                    sniPacket.Data = null;
-                }
-
-                sniPacket.Reset();
-
-                if(_sniPacketCache == null)
-                {
-                    _sniPacketCache = new SNIPacketCache();
-                }
-                _sniPacketCache.Put(sniPacket);
-            }
-        }
-
-        public byte[] GetSNIPacketBuffer(int bufferSize)
-        {
-            byte[] buffer = null;
-            if (_sniPacketBufferCache != null)
-            {
-                buffer = _sniPacketBufferCache.Get(bufferSize);
-            }
-
-            if (buffer == null)
-            {
-                buffer = new byte[bufferSize];
-            }
-
-            return buffer;
-        }
-    }
-
-    internal class SNIPacketCache : IDisposable
-    {
-        private const int maxSize = 100;
-        private ConcurrentStack<SNIPacket> cache = new ConcurrentStack<SNIPacket>();
-
-        public void Dispose()
-        {
-            cache.Clear();
-        }
-
-        public void Put(SNIPacket sniPacket)
-        {
-            if (sniPacket == null)
-            {
-                return;
-            }
-
-            if (cache.Count < maxSize)
-            {
-                cache.Push(sniPacket);
-            }
-        }
-
-        public SNIPacket Get()
-        {
-            SNIPacket sniPacket = null;
-            cache.TryPop(out sniPacket);
-
-            return sniPacket;
-        }
-    }
-
-    internal class ByteArrayCache : IDisposable
-    {
-        private const int maxSize = 100;
-        private ConcurrentDictionary<int, ConcurrentStack<byte[]>> cacheGroup = new ConcurrentDictionary<int, ConcurrentStack<byte[]>>();
-
-        public void Dispose()
-        {
-            foreach (ConcurrentStack<byte[]> cs in cacheGroup.Values)
-            {
-                cs.Clear();
-            }
-            cacheGroup.Clear();
-        }
-
-        public void Put(byte[] buffer)
-        {
-            if (buffer == null)
-            {
-                return;
-            }
-
-            int bufferSize = buffer.Length;
-
-            if (bufferSize == 0)
-            {
-                return;
-            }
-
-            ConcurrentStack<byte[]> cache = cacheGroup.GetOrAdd(bufferSize, new ConcurrentStack<byte[]>());
-            if (cache.Count < maxSize)
-            {
-                cache.Push(buffer);
-            }
-        }
-
-        public byte[] Get(int bufferSize)
-        {
-            if (bufferSize <= 0)
-            {
-                return null;
-            }
-
-            ConcurrentStack<byte[]> cache;
-            byte[] buffer = null;
-            if (cacheGroup.TryGetValue(bufferSize, out cache))
-            {
-                cache.TryPop(out buffer);
-            }
-
-            return buffer;
         }
     }
 }
