@@ -250,7 +250,10 @@ namespace System.Data.SqlClient.SNI
         {
             if (_data != null)
             {
-                _arrayPool.Return(_data);
+                if(_isBufferFromArrayPool)
+                {
+                    _arrayPool.Return(_data);
+                }
                 _data = null;
             }
             Reset();
