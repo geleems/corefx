@@ -38,10 +38,9 @@ namespace System.Data.SqlClient.SNI
         private int _bufferSize = TdsEnums.DEFAULT_LOGIN_PACKET_SIZE;
         private uint _status = TdsEnums.SNI_UNINITIALIZED;
         private Guid _connectionId = Guid.NewGuid();
+        private SNIPacketFactory _sniPacketFactory = SNIPacketFactory.Instance;
 
         private const int MaxParallelIpAddresses = 64;
-
-        private SNIPacketFactory _sniPacketFactory = SNIPacketFactory.Instance;
 
         /// <summary>
         /// Dispose object
@@ -66,12 +65,6 @@ namespace System.Data.SqlClient.SNI
                 {
                     _tcpStream.Dispose();
                     _tcpStream = null;
-                }
-
-                if(_sniPacketFactory != null)
-                {
-                    _sniPacketFactory.Dispose();
-                    _sniPacketFactory = null;
                 }
 
                 //Release any references held by _stream.
@@ -535,7 +528,6 @@ namespace System.Data.SqlClient.SNI
         /// <param name="packet">SNI packet</param>
         /// <param name="callback">Completion callback</param>
         /// <returns>SNI error code</returns>
-        /*
         public override uint SendAsync(SNIPacket packet, SNIAsyncCallback callback = null)
         {
             SNIPacket newPacket = packet;
@@ -577,26 +569,26 @@ namespace System.Data.SqlClient.SNI
 
             return TdsEnums.SNI_SUCCESS_IO_PENDING;
         }
-        */
+        /*
         public override uint SendAsync(SNIPacket packet, SNIAsyncCallback callback = null)
         {
             Task writeTask = packet.WriteToStreamAsync(_stream);
             writeTask.ContinueWith((t) =>
-            {
-                SNIAsyncCallback cb = callback ?? _sendCallback;
-                uint status = TdsEnums.SNI_SUCCESS;
-                if (t.IsFaulted)
                 {
-                    SNILoadHandle.SingletonInstance.LastError = new SNIError(SNIProviders.TCP_PROV, SNICommon.InternalExceptionError, t.Exception);
-                    status = TdsEnums.SNI_ERROR;
+                    SNIAsyncCallback cb = callback ?? _sendCallback;
+                    uint status = TdsEnums.SNI_SUCCESS;
+                    if (t.IsFaulted)
+                    {
+                        SNILoadHandle.SingletonInstance.LastError = new SNIError(SNIProviders.TCP_PROV, SNICommon.InternalExceptionError, t.Exception);
+                        status = TdsEnums.SNI_ERROR;
+                    }
+                    cb(packet, status);
                 }
-                cb(packet, status);
-            }
             );
 
             return TdsEnums.SNI_SUCCESS_IO_PENDING;
-
         }
+        */
 
         /// <summary>
         /// Receive a packet asynchronously

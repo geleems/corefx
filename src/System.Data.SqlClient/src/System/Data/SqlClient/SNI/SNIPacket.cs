@@ -124,19 +124,6 @@ namespace System.Data.SqlClient.SNI
         }
 
 
-        public SNIPacketFactory Factory
-        {
-            get
-            {
-                return _sniPacketFactory;
-            }
-
-            set
-            {
-                _sniPacketFactory = value;
-            }
-        }
-
         /// <summary>
         /// Allocate space for data
         /// </summary>
@@ -448,7 +435,6 @@ namespace System.Data.SqlClient.SNI
             if (sniPacket == null)
             {
                 sniPacket = new SNIPacket();
-                sniPacket.Factory = this;
             }
 
             return sniPacket;
@@ -505,7 +491,7 @@ namespace System.Data.SqlClient.SNI
 
     internal class SNIPacketCache : IDisposable
     {
-        private const int maxSize = 100;
+        private const int maxSize = 1000;
         private ConcurrentStack<SNIPacket> cache = new ConcurrentStack<SNIPacket>();
 
         public void Dispose()
@@ -523,6 +509,7 @@ namespace System.Data.SqlClient.SNI
             if (cache.Count < maxSize)
             {
                 cache.Push(sniPacket);
+                //Console.WriteLine("count: " + cache.Count);
             }
         }
 
@@ -537,7 +524,7 @@ namespace System.Data.SqlClient.SNI
 
     internal class ByteArrayCache : IDisposable
     {
-        private const int maxSize = 100;
+        private const int maxSize = 1000;
         private ConcurrentDictionary<int, ConcurrentStack<byte[]>> cacheGroup = new ConcurrentDictionary<int, ConcurrentStack<byte[]>>();
 
         public void Dispose()
