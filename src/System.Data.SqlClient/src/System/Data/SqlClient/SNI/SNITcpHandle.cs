@@ -41,7 +41,7 @@ namespace System.Data.SqlClient.SNI
 
         private const int MaxParallelIpAddresses = 64;
 
-        private SNIPacketFactory _sniPacketFactory = new SNIPacketFactory();
+        private SNIPacketFactory _sniPacketFactory = SNIPacketFactory.Instance;
 
         /// <summary>
         /// Dispose object

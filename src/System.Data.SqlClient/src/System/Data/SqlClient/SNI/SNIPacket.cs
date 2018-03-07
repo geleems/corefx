@@ -19,7 +19,8 @@ namespace System.Data.SqlClient.SNI
         private int _offset;
         private string _description;
         private SNIAsyncCallback _completionCallback;
-        private SNIPacketFactory _factory;
+
+        private SNIPacketFactory _sniPacketFactory = SNIPacketFactory.Instance;
 
         /// <summary>
         /// Packet description (used for debugging)
@@ -127,12 +128,12 @@ namespace System.Data.SqlClient.SNI
         {
             get
             {
-                return _factory;
+                return _sniPacketFactory;
             }
 
             set
             {
-                _factory = value;
+                _sniPacketFactory = value;
             }
         }
 
@@ -144,9 +145,9 @@ namespace System.Data.SqlClient.SNI
         {
             if (_data == null || _data.Length != bufferSize)
             {
-                if (_factory != null)
+                if (_sniPacketFactory != null)
                 {
-                    _data = _factory.GetSNIPacketBuffer(bufferSize);
+                    _data = _sniPacketFactory.GetSNIPacketBuffer(bufferSize);
                 }
                 else
                 {
@@ -165,9 +166,9 @@ namespace System.Data.SqlClient.SNI
         public SNIPacket Clone()
         {
             SNIPacket packet;
-            if (_factory != null)
+            if (_sniPacketFactory != null)
             {
-                packet = _factory.GetSNIPacket(_data.Length);
+                packet = _sniPacketFactory.GetSNIPacket(_data.Length);
             }
             else
             {
@@ -269,9 +270,9 @@ namespace System.Data.SqlClient.SNI
         /// </summary>
         public void Release()
         {
-            if (_factory != null)
+            if (_sniPacketFactory != null)
             {
-                _factory.PutSNIPacket(this);
+                _sniPacketFactory.PutSNIPacket(this);
             }
             else
             {
@@ -407,21 +408,31 @@ namespace System.Data.SqlClient.SNI
 
     internal class SNIPacketFactory : IDisposable
     {
-        SNIPacketCache _sniPacketCache;
-        ByteArrayCache _sniPacketBufferCache;
+        private static SNIPacketFactory instance = new SNIPacketFactory();
+
+        public static SNIPacketFactory Instance
+        {
+            get
+            {
+                return instance;
+            }
+        }
+
+        private SNIPacketCache _sniPacketCache;
+        private ByteArrayCache _sniPacketBufferCache;
+
+        private SNIPacketFactory() { }
 
         public void Dispose()
         {
             if(_sniPacketCache != null)
             {
                 _sniPacketCache.Dispose();
-                _sniPacketCache = null;
             }
 
             if (_sniPacketBufferCache != null)
             {
                 _sniPacketBufferCache.Dispose();
-                _sniPacketBufferCache = null;
             }
         }
 
@@ -494,12 +505,12 @@ namespace System.Data.SqlClient.SNI
 
     internal class SNIPacketCache : IDisposable
     {
+        private const int maxSize = 100;
         private ConcurrentStack<SNIPacket> cache = new ConcurrentStack<SNIPacket>();
 
         public void Dispose()
         {
             cache.Clear();
-            cache = null;
         }
 
         public void Put(SNIPacket sniPacket)
@@ -509,7 +520,10 @@ namespace System.Data.SqlClient.SNI
                 return;
             }
 
-            cache.Push(sniPacket);
+            if (cache.Count < maxSize)
+            {
+                cache.Push(sniPacket);
+            }
         }
 
         public SNIPacket Get()
@@ -523,6 +537,7 @@ namespace System.Data.SqlClient.SNI
 
     internal class ByteArrayCache : IDisposable
     {
+        private const int maxSize = 100;
         private ConcurrentDictionary<int, ConcurrentStack<byte[]>> cacheGroup = new ConcurrentDictionary<int, ConcurrentStack<byte[]>>();
 
         public void Dispose()
@@ -532,7 +547,6 @@ namespace System.Data.SqlClient.SNI
                 cs.Clear();
             }
             cacheGroup.Clear();
-            cacheGroup = null;
         }
 
         public void Put(byte[] buffer)
@@ -550,7 +564,10 @@ namespace System.Data.SqlClient.SNI
             }
 
             ConcurrentStack<byte[]> cache = cacheGroup.GetOrAdd(bufferSize, new ConcurrentStack<byte[]>());
-            cache.Push(buffer);
+            if (cache.Count < maxSize)
+            {
+                cache.Push(buffer);
+            }
         }
 
         public byte[] Get(int bufferSize)
