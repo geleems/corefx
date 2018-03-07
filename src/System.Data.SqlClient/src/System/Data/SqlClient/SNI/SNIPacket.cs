@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
+using System.Collections.Concurrent;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,19 +16,10 @@ namespace System.Data.SqlClient.SNI
     {
         private byte[] _data;
         private int _length;
-        private int _capacity;
         private int _offset;
         private string _description;
         private SNIAsyncCallback _completionCallback;
-
-        /// <summary>
-        /// Constructor
-        /// </summary>
-        /// <param name="handle">Owning SNI handle</param>
-        public SNIPacket(SNIHandle handle)
-        {
-            _offset = 0;
-        }
+        private SNIPacketFactory _factory;
 
         /// <summary>
         /// Packet description (used for debugging)
@@ -45,8 +37,21 @@ namespace System.Data.SqlClient.SNI
             }
         }
 
+        public byte[] Data
+        {
+            get
+            {
+                return _data;
+            }
+
+            set
+            {
+                _data = value;
+            }
+        }
+
         /// <summary>
-        /// Data left to process
+        /// Length of data left to process
         /// </summary>
         public int DataLeft
         {
@@ -67,6 +72,19 @@ namespace System.Data.SqlClient.SNI
             }
         }
 
+        public int Capacity
+        {
+            get
+            {
+                int capacity = -1;
+                if (_data != null)
+                {
+                    capacity = _data.Length;
+                }
+                return capacity;
+            }
+        }
+
         /// <summary>
         /// Packet validity
         /// </summary>
@@ -83,9 +101,7 @@ namespace System.Data.SqlClient.SNI
         /// </summary>
         public void Dispose()
         {
-            _data = null;
-            _length = 0;
-            _capacity = 0;
+            Release();
         }
 
         /// <summary>
@@ -106,14 +122,40 @@ namespace System.Data.SqlClient.SNI
             _completionCallback(this, sniErrorCode);
         }
 
+
+        public SNIPacketFactory Factory
+        {
+            get
+            {
+                return _factory;
+            }
+
+            set
+            {
+                _factory = value;
+            }
+        }
+
         /// <summary>
         /// Allocate space for data
         /// </summary>
-        /// <param name="capacity">Bytes to allocate</param>
-        public void Allocate(int capacity)
+        /// <param name="bufferSize">Length of byte array to be allocated</param>
+        public void Allocate(int bufferSize)
         {
-            _capacity = capacity;
-            _data = new Byte[capacity];
+            if (_data == null || _data.Length != bufferSize)
+            {
+                if (_factory != null)
+                {
+                    _data = _factory.GetSNIPacketBuffer(bufferSize);
+                }
+                else
+                {
+                    _data = new byte[bufferSize];
+                }
+            }
+
+            _length = 0;
+            _offset = 0;
         }
 
         /// <summary>
@@ -122,10 +164,21 @@ namespace System.Data.SqlClient.SNI
         /// <returns>Cloned packet</returns>
         public SNIPacket Clone()
         {
-            SNIPacket packet = new SNIPacket(null);
-            packet._data = new byte[_length];
-            Buffer.BlockCopy(_data, 0, packet._data, 0, _length);
+            SNIPacket packet;
+            if (_factory != null)
+            {
+                packet = _factory.GetSNIPacket(_data.Length);
+            }
+            else
+            {
+                packet = new SNIPacket();
+                packet._data = new byte[_data.Length];
+            }
+
+            Buffer.BlockCopy(_data, 0, packet._data, 0, _data.Length);
             packet._length = _length;
+            packet._description = _description;
+            packet._completionCallback = _completionCallback;
 
             return packet;
         }
@@ -133,7 +186,7 @@ namespace System.Data.SqlClient.SNI
         /// <summary>
         /// Get packet data
         /// </summary>
-        /// <param name="inBuff">Buffer</param>
+        /// <param name="buffer">Buffer</param>
         /// <param name="dataSize">Data in packet</param>
         public void GetData(byte[] buffer, ref int dataSize)
         {
@@ -150,7 +203,6 @@ namespace System.Data.SqlClient.SNI
         {
             _data = data;
             _length = length;
-            _capacity = length;
             _offset = 0;
         }
 
@@ -208,7 +260,7 @@ namespace System.Data.SqlClient.SNI
             }
 
             Buffer.BlockCopy(_data, _offset, buffer, dataOffset, size);
-            _offset = _offset + size;
+            _offset += size;
             return size;
         }
 
@@ -217,9 +269,15 @@ namespace System.Data.SqlClient.SNI
         /// </summary>
         public void Release()
         {
-            _length = 0;
-            _capacity = 0;
-            _data = null;
+            if (_factory != null)
+            {
+                _factory.PutSNIPacket(this);
+            }
+            else
+            {
+                _data = null;
+                Reset();
+            }
         }
 
         /// <summary>
@@ -228,7 +286,9 @@ namespace System.Data.SqlClient.SNI
         public void Reset()
         {
             _length = 0;
-            _data = new byte[_capacity];
+            _offset = 0;
+            _description = null;
+            _completionCallback = null;
         }
 
         /// <summary>
@@ -249,7 +309,7 @@ namespace System.Data.SqlClient.SNI
                 options |= TaskContinuationOptions.LongRunning;
             }
 
-            stream.ReadAsync(_data, 0, _capacity).ContinueWith(t =>
+            stream.ReadAsync(_data, 0, _data.Length).ContinueWith(t =>
             {
                 Exception e = t.Exception != null ? t.Exception.InnerException : null;
                 if (e != null)
@@ -270,7 +330,7 @@ namespace System.Data.SqlClient.SNI
 
                 if (error)
                 {
-                    this.Release();
+                    Release();
                 }
 
                 callback(this, error ? TdsEnums.SNI_ERROR : TdsEnums.SNI_SUCCESS);
@@ -286,7 +346,7 @@ namespace System.Data.SqlClient.SNI
         /// <param name="stream">Stream to read from</param>
         public void ReadFromStream(Stream stream)
         {
-            _length = stream.Read(_data, 0, _capacity);
+            _length = stream.Read(_data, 0, _data.Length);
         }
 
         /// <summary>
@@ -296,6 +356,11 @@ namespace System.Data.SqlClient.SNI
         public void WriteToStream(Stream stream)
         {
             stream.Write(_data, 0, _length);
+        }
+
+        public Task WriteToStreamAsync(Stream stream)
+        {
+            return stream.WriteAsync(_data, 0, _length);
         }
 
         /// <summary>
@@ -337,6 +402,172 @@ namespace System.Data.SqlClient.SNI
             }
 
             return false;
+        }
+    }
+
+    internal class SNIPacketFactory : IDisposable
+    {
+        SNIPacketCache _sniPacketCache;
+        ByteArrayCache _sniPacketBufferCache;
+
+        public void Dispose()
+        {
+            if(_sniPacketCache != null)
+            {
+                _sniPacketCache.Dispose();
+                _sniPacketCache = null;
+            }
+
+            if (_sniPacketBufferCache != null)
+            {
+                _sniPacketBufferCache.Dispose();
+                _sniPacketBufferCache = null;
+            }
+        }
+
+        public SNIPacket GetSNIPacket()
+        {
+            SNIPacket sniPacket = null;
+
+            if (_sniPacketCache != null)
+            {
+                sniPacket = _sniPacketCache.Get();
+            }
+
+            if (sniPacket == null)
+            {
+                sniPacket = new SNIPacket();
+                sniPacket.Factory = this;
+            }
+
+            return sniPacket;
+        }
+
+        public SNIPacket GetSNIPacket(int bufferSize)
+        {
+            SNIPacket sniPacket = GetSNIPacket();
+            sniPacket.Data = GetSNIPacketBuffer(bufferSize);
+
+            return sniPacket;
+        }
+
+        public void PutSNIPacket(SNIPacket sniPacket)
+        {
+            if (sniPacket != null)
+            {
+                if (sniPacket.Data != null)
+                {
+                    if (_sniPacketBufferCache == null)
+                    {
+                        _sniPacketBufferCache = new ByteArrayCache();
+                    }
+                    _sniPacketBufferCache.Put(sniPacket.Data);
+                    sniPacket.Data = null;
+                }
+
+                sniPacket.Reset();
+
+                if(_sniPacketCache == null)
+                {
+                    _sniPacketCache = new SNIPacketCache();
+                }
+                _sniPacketCache.Put(sniPacket);
+            }
+        }
+
+        public byte[] GetSNIPacketBuffer(int bufferSize)
+        {
+            byte[] buffer = null;
+            if (_sniPacketBufferCache != null)
+            {
+                buffer = _sniPacketBufferCache.Get(bufferSize);
+            }
+
+            if (buffer == null)
+            {
+                buffer = new byte[bufferSize];
+            }
+
+            return buffer;
+        }
+    }
+
+    internal class SNIPacketCache : IDisposable
+    {
+        private ConcurrentStack<SNIPacket> cache = new ConcurrentStack<SNIPacket>();
+
+        public void Dispose()
+        {
+            cache.Clear();
+            cache = null;
+        }
+
+        public void Put(SNIPacket sniPacket)
+        {
+            if (sniPacket == null)
+            {
+                return;
+            }
+
+            cache.Push(sniPacket);
+        }
+
+        public SNIPacket Get()
+        {
+            SNIPacket sniPacket = null;
+            cache.TryPop(out sniPacket);
+
+            return sniPacket;
+        }
+    }
+
+    internal class ByteArrayCache : IDisposable
+    {
+        private ConcurrentDictionary<int, ConcurrentStack<byte[]>> cacheGroup = new ConcurrentDictionary<int, ConcurrentStack<byte[]>>();
+
+        public void Dispose()
+        {
+            foreach (ConcurrentStack<byte[]> cs in cacheGroup.Values)
+            {
+                cs.Clear();
+            }
+            cacheGroup.Clear();
+            cacheGroup = null;
+        }
+
+        public void Put(byte[] buffer)
+        {
+            if (buffer == null)
+            {
+                return;
+            }
+
+            int bufferSize = buffer.Length;
+
+            if (bufferSize == 0)
+            {
+                return;
+            }
+
+            ConcurrentStack<byte[]> cache = cacheGroup.GetOrAdd(bufferSize, new ConcurrentStack<byte[]>());
+            cache.Push(buffer);
+        }
+
+        public byte[] Get(int bufferSize)
+        {
+            if (bufferSize <= 0)
+            {
+                return null;
+            }
+
+            ConcurrentStack<byte[]> cache;
+            byte[] buffer = null;
+            if (cacheGroup.TryGetValue(bufferSize, out cache))
+            {
+                cache.TryPop(out buffer);
+            }
+
+            return buffer;
         }
     }
 }

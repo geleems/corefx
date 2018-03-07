@@ -4,13 +4,11 @@
 
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
@@ -43,6 +41,8 @@ namespace System.Data.SqlClient.SNI
 
         private const int MaxParallelIpAddresses = 64;
 
+        private SNIPacketFactory _sniPacketFactory = new SNIPacketFactory();
+
         /// <summary>
         /// Dispose object
         /// </summary>
@@ -66,6 +66,12 @@ namespace System.Data.SqlClient.SNI
                 {
                     _tcpStream.Dispose();
                     _tcpStream = null;
+                }
+
+                if(_sniPacketFactory != null)
+                {
+                    _sniPacketFactory.Dispose();
+                    _sniPacketFactory = null;
                 }
 
                 //Release any references held by _stream.
@@ -475,8 +481,7 @@ namespace System.Data.SqlClient.SNI
                         return TdsEnums.SNI_WAIT_TIMEOUT;
                     }
 
-                    packet = new SNIPacket(null);
-                    packet.Allocate(_bufferSize);
+                    packet = _sniPacketFactory.GetSNIPacket(_bufferSize);
                     packet.ReadFromStream(_stream);
 
                     if (packet.Length == 0)
@@ -581,8 +586,7 @@ namespace System.Data.SqlClient.SNI
         {
             lock (this)
             {
-                packet = new SNIPacket(null);
-                packet.Allocate(_bufferSize);
+                packet = _sniPacketFactory.GetSNIPacket(_bufferSize);
 
                 try
                 {
