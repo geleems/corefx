@@ -3,7 +3,6 @@
 // See the LICENSE file in the project root for more information.
 
 using System.Buffers;
-using System.Collections.Concurrent;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,6 +16,7 @@ namespace System.Data.SqlClient.SNI
     {
         private byte[] _data;
         private int _length;
+        private int _capacity;
         private int _offset;
         private string _description;
         private SNIAsyncCallback _completionCallback;
@@ -24,11 +24,14 @@ namespace System.Data.SqlClient.SNI
         private ArrayPool<byte>  _arrayPool = ArrayPool<byte>.Shared;
         private bool _isBufferFromArrayPool = false;
 
-        public SNIPacket() { }
-
-        public SNIPacket(int minimumLength)
+        public SNIPacket()
         {
-            Allocate(minimumLength);
+            _capacity = -1;
+        }
+
+        public SNIPacket(int capacity)
+        {
+            Allocate(capacity);
         }
 
         /// <summary>
@@ -73,12 +76,7 @@ namespace System.Data.SqlClient.SNI
         {
             get
             {
-                int capacity = -1;
-                if (_data != null)
-                {
-                    capacity = _data.Length;
-                }
-                return capacity;
+                return _capacity;
             }
         }
 
@@ -125,9 +123,9 @@ namespace System.Data.SqlClient.SNI
         /// Allocate space for data
         /// </summary>
         /// <param name="bufferSize">Length of byte array to be allocated</param>
-        public void Allocate(int minimumLength)
+        public void Allocate(int capacity)
         {
-            if (_data != null && _data.Length < minimumLength)
+            if (_data != null && _data.Length < capacity)
             {
                 if (_isBufferFromArrayPool)
                 {
@@ -138,10 +136,11 @@ namespace System.Data.SqlClient.SNI
 
             if (_data == null)
             {
-                _data = _arrayPool.Rent(minimumLength);
+                _data = _arrayPool.Rent(capacity);
                 _isBufferFromArrayPool = true;
             }
 
+            _capacity = capacity;
             _length = 0;
             _offset = 0;
         }
@@ -152,8 +151,8 @@ namespace System.Data.SqlClient.SNI
         /// <returns>Cloned packet</returns>
         public SNIPacket Clone()
         {
-            SNIPacket packet = new SNIPacket(_length);
-            Buffer.BlockCopy(_data, 0, packet._data, 0, _length);
+            SNIPacket packet = new SNIPacket(_capacity);
+            Buffer.BlockCopy(_data, 0, packet._data, 0, _capacity);
             packet._length = _length;
             packet._description = _description;
             packet._completionCallback = _completionCallback;
@@ -177,12 +176,18 @@ namespace System.Data.SqlClient.SNI
         /// </summary>
         /// <param name="data">Data</param>
         /// <param name="length">Length</param>
-        public void SetData(byte[] data, int length, bool isArrayFromArrayPool = false)
+        public void SetData(byte[] data, int length, int capaticy = -1, bool isArrayFromArrayPool = false)
         {
             _data = data;
             _length = length;
+            _capacity = capaticy < 0 ? data.Length : capaticy;
             _offset = 0;
             _isBufferFromArrayPool = isArrayFromArrayPool;
+        }
+
+        public void SetData(byte[] data, int length, bool isArrayFromArrayPool)
+        {
+            SetData(data, length, data.Length, isArrayFromArrayPool);
         }
 
         /// <summary>
@@ -255,6 +260,7 @@ namespace System.Data.SqlClient.SNI
                     _arrayPool.Return(_data);
                 }
                 _data = null;
+                _capacity = -1;
             }
             Reset();
         }
@@ -288,7 +294,7 @@ namespace System.Data.SqlClient.SNI
                 options |= TaskContinuationOptions.LongRunning;
             }
 
-            stream.ReadAsync(_data, 0, _data.Length, CancellationToken.None).ContinueWith(t =>
+            stream.ReadAsync(_data, 0, _capacity, CancellationToken.None).ContinueWith(t =>
             {
                 Exception e = t.Exception != null ? t.Exception.InnerException : null;
                 if (e != null)
@@ -325,7 +331,7 @@ namespace System.Data.SqlClient.SNI
         /// <param name="stream">Stream to read from</param>
         public void ReadFromStream(Stream stream)
         {
-            _length = stream.Read(_data, 0, _data.Length);
+            _length = stream.Read(_data, 0, _capacity);
         }
 
         /// <summary>
