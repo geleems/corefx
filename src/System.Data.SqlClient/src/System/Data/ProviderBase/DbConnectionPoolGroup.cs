@@ -8,6 +8,7 @@
 using System.Collections.Concurrent;
 using System.Data.Common;
 using System.Diagnostics;
+using System.Threading;
 
 namespace System.Data.ProviderBase
 {
@@ -167,7 +168,7 @@ namespace System.Data.ProviderBase
             // PoolGroupOptions will only be null when we're not supposed to pool
             // connections.
             DbConnectionPool pool = null;
-            if (null != _poolGroupOptions)
+            if (_poolGroupOptions != null)
             {
                 DbConnectionPoolIdentity currentIdentity = DbConnectionPoolIdentity.NoIdentity;
 
@@ -187,70 +188,41 @@ namespace System.Data.ProviderBase
                     }
                 }
 
-                if (null != currentIdentity)
+                if (currentIdentity != null)
                 {
                     if (!_poolCollection.TryGetValue(currentIdentity, out pool)) // find the pool
-                    { 
+                    {
+                        DbConnectionPoolProviderInfo connectionPoolProviderInfo = connectionFactory.CreateConnectionPoolProviderInfo(this.ConnectionOptions);
+                        DbConnectionPool newPool = new DbConnectionPool(connectionFactory, this, currentIdentity, connectionPoolProviderInfo);
+
+                        bool isNewPoolAdded = false;
                         lock (this)
                         {
-                            // Did someone already add it to the list?
-                            if (!_poolCollection.TryGetValue(currentIdentity, out pool))
+                            if (!_poolCollection.TryGetValue(currentIdentity, out pool) && _state != PoolGroupStateDisabled)
                             {
-                                DbConnectionPoolProviderInfo connectionPoolProviderInfo = connectionFactory.CreateConnectionPoolProviderInfo(this.ConnectionOptions);
-                                DbConnectionPool newPool = new DbConnectionPool(connectionFactory, this, currentIdentity, connectionPoolProviderInfo);
-
-                                if (MarkPoolGroupAsActive())
-                                {
-                                    // If we get here, we know for certain that we there isn't
-                                    // a pool that matches the current identity, so we have to
-                                    // add the optimistically created one
-                                    newPool.Startup(); // must start pool before usage
-                                    bool addResult = _poolCollection.TryAdd(currentIdentity, newPool);
-                                    Debug.Assert(addResult, "No other pool with current identity should exist at this point");
-                                    pool = newPool;
-                                }
-                                else
-                                {
-                                    // else pool entry has been disabled so don't create new pools
-                                    Debug.Assert(PoolGroupStateDisabled == _state, "state should be disabled");
-
-                                    // don't need to call connectionFactory.QueuePoolForRelease(newPool) because		
-                                    // pool callbacks were delayed and no risk of connections being created		
-                                    newPool.Shutdown();
-                                }
-                            }
-                            else
-                            {
-                                // else found an existing pool to use instead
-                                Debug.Assert(PoolGroupStateActive == _state, "state should be active since a pool exists and lock holds");
+                                // If we get here, we know for sure that we there isn't a pool
+                                // for the current identity, so we have to add the optimistically created one.
+                                _state = PoolGroupStateActive;
+                                isNewPoolAdded = _poolCollection.TryAdd(currentIdentity, newPool);
+                                Debug.Assert(isNewPoolAdded, "No other pool with current identity should exist at this point");
                             }
                         }
+
+                        if (isNewPoolAdded)
+                        {
+                            newPool.Startup(); // must start pool before usage
+                            pool = newPool;
+                        }
                     }
-                    // the found pool could be in any state
                 }
             }
 
-            if (null == pool)
+            if (pool == null && _state != PoolGroupStateDisabled)
             {
-                lock (this)
-                {
-                    // keep the pool entry state active when not pooling
-                    MarkPoolGroupAsActive();
-                }
+                Interlocked.CompareExchange(ref _state, PoolGroupStateActive, PoolGroupStateIdle);
             }
+
             return pool;
-        }
-
-        private bool MarkPoolGroupAsActive()
-        {
-            // when getting a connection, make the entry active if it was idle (but not disabled)
-            // must always lock this before calling
-
-            if (PoolGroupStateIdle == _state)
-            {
-                _state = PoolGroupStateActive;
-            }
-            return (PoolGroupStateActive == _state);
         }
 
         internal bool Prune()
