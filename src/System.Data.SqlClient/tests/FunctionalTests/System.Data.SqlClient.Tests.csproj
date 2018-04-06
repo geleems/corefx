@@ -9,6 +9,19 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'netstandard-Windows_NT-Debug|AnyCPU'" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'netstandard-Windows_NT-Release|AnyCPU'" />
   <ItemGroup>
+    <!-- Gene's Tests START -->
+    <Compile Include="GenesTestCollection\Common\TestUtils.cs" />
+    <Compile Include="GenesTestCollection\Common\Secret.cs" />
+    <Compile Include="GenesTestCollection\PerformaceTest\AsyncPerformaceTest.cs" />
+    <Compile Include="GenesTestCollection\PerformaceTest\PerformanceTestWithThreads.cs" />
+    <Compile Include="GenesTestCollection\ConnectionPoolingTest\ConnectionPoolingTest.cs" />
+    <Compile Include="GenesTestCollection\BasicConnectionTest.cs" />
+    <Compile Include="GenesTestCollection\GenesTest.cs" />
+    <Compile Include="GenesTestCollection\DecimalConversionTest.cs" />
+    <Compile Include="GenesTestCollection\PerfGapIssueReproTest.cs" />
+    <Compile Include="GenesTestCollection\PerformaceTest.cs" />
+    <Compile Include="GenesTestCollection\ReadAsyncTest.cs" />
+    <!-- Gene's Tests End -->
     <Compile Include="CloneTests.cs" />
     <Compile Include="BaseProviderAsyncTest\BaseProviderAsyncTest.cs" />
     <Compile Include="BaseProviderAsyncTest\MockCommand.cs" />

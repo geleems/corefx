@@ -456,6 +456,7 @@
     <Reference Include="System.ComponentModel" />
     <Reference Include="System.ComponentModel.Primitives" />
     <Reference Include="System.ComponentModel.TypeConverter" />
+    <Reference Include="System.Console" />
     <Reference Include="System.Diagnostics.Debug" />
     <Reference Include="System.Diagnostics.DiagnosticSource" />
     <Reference Include="System.Diagnostics.Tools" />
